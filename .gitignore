@@ -1,0 +1,5 @@
+# Build intermediates
+build/
+*.class
+
+# Keep the prebuilt runnable JAR in dist/ (committed on purpose)
