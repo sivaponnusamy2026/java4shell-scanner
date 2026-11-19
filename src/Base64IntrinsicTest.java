@@ -14,7 +14,8 @@ import java.util.Locale;
  * EMPIRICALLY, from WITHIN the JVM under test:
  *
  *   1. It reads its own runtime version and decides whether that build is in the
- *      vulnerable range (OpenJDK-based 17.0.6+, and all of 21/25/27 below the fix).
+ *      vulnerable range (any JDK 17.0.6+, and all of 21/25/27 below the fix;
+ *      Oracle JDK, OpenJDK and all OpenJDK-derived vendor builds alike).
  *   2. It reads, in-process, the VM options the JVM actually negotiated for THIS
  *      CPU - UseAVX and UseBASE64Intrinsics - via HotSpotDiagnosticMXBean. The
  *      vulnerable hand-written AVX-512 VBMI Base64 decode stub is only installed

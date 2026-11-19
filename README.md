@@ -1,7 +1,12 @@
 # Java4Shell Dynamic Probe — CVE-2026-114938
 
 A **dynamic** detector for **CVE-2026-114938 ("Java4Shell")** — the heap buffer
-overflow in OpenJDK's AVX-512 `java.util.Base64` decoder.
+overflow in the JDK's AVX-512 `java.util.Base64` decoder.
+
+Works across **all JDK distributions** — Oracle JDK, OpenJDK, and OpenJDK-derived
+builds (Eclipse Temurin, Amazon Corretto, Azul Zulu, Microsoft, BellSoft Liberica,
+Red Hat, SapMachine, …). It reads the runtime's own version and negotiated VM
+options in-process, so it does not matter which vendor shipped the JDK.
 
 Unlike a static version/CPU scanner, this build decides the result **empirically,
 from inside the JVM under test**, and answers one **point-in-time** question:
