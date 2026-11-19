@@ -282,6 +282,11 @@ public final class Base64IntrinsicTest {
         System.out.println("AVX-512 active (UseAVX>=3). If any is false the bug cannot execute here.");
         System.out.println("Exit codes: 2=vulnerable now, 0=not vulnerable now.");
         System.out.println("Options: --quiet (only the result line), --help.");
+        System.out.println();
+        System.out.println("Set JVM flags by placing them before -jar, e.g. model the workaround:");
+        System.out.println("  java -XX:-UseBASE64Intrinsics -jar java4shell-probe.jar");
+        System.out.println("Or via the launchers: probe.sh/probe.cmd --intrinsics off|on,");
+        System.out.println("  --jvm-arg <flag> (repeatable), --java <path>, --dir <dir>.");
     }
 
     @SuppressWarnings("unused")
