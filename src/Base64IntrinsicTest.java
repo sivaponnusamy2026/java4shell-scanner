@@ -65,89 +65,62 @@ public final class Base64IntrinsicTest {
         // ---- (3) actually drive the vectorized intrinsic ---------------------
         boolean exercised = exerciseBase64Intrinsic();
 
-        // ---- combine ---------------------------------------------------------
-        // The vulnerable code path is live when the JVM is a vulnerable build AND
-        // it negotiated the AVX-512 Base64 intrinsic for this CPU.
-        boolean cpuPathActive = avx512 && base64Intrinsics
-                && (vbmiConfirmed == null || vbmiConfirmed.booleanValue());
+        // ---- combine: POINT-IN-TIME verdict ---------------------------------
+        // Question answered: is the vulnerable code path reachable on THIS JVM, on
+        // THIS hardware, AS CONFIGURED, right now? The JVM stays on this hardware,
+        // so "what if it were moved to an AVX-512 host" is deliberately out of scope.
+        //
+        // The vulnerable path can actually execute now only if ALL of these hold:
+        //   - the build is in the affected version range, AND
+        //   - UseBASE64Intrinsics is enabled (the vulnerable stub can run), AND
+        //   - the CPU actually runs AVX-512 (UseAVX>=3; avx512vbmi where confirmable).
+        // If any is false, the bug cannot be triggered on this host as it stands.
+        boolean cpuAvx512 = avx512 && (vbmiConfirmed == null || vbmiConfirmed.booleanValue());
+        boolean vulnerableNow = vulnVersion && !isArm && base64Intrinsics && cpuAvx512;
 
-        String verdict;
+        String verdict = vulnerableNow ? "VULNERABLE" : "NOT_VULNERABLE";
+        String model = cpuModel();
+        String modelTag = model.isEmpty() ? "" : " [" + model + "]";
+
         String reason;
-        if (!vulnVersion) {
-            verdict = "NOT_AFFECTED";
-            reason = "runtime " + version + " is not in the affected range";
-        } else if (isArm) {
-            verdict = "NOT_AFFECTED";
-            reason = "ARM architecture - AVX-512 Base64 intrinsic does not exist here";
-        } else if (cpuPathActive) {
-            verdict = "EXPLOITABLE";
-            reason = "vulnerable runtime AND the AVX-512 Base64 intrinsic is active on this CPU"
-                    + (vbmiConfirmed == null ? " (UseAVX=3; confirm CPU is AVX-512 VBMI / Ice Lake+/Zen 4+)"
+        if (vulnerableNow) {
+            reason = "affected build, Base64 intrinsic enabled, and AVX-512 active on this CPU"
+                    + (vbmiConfirmed == null ? " (UseAVX=3; confirm AVX-512 VBMI / Ice Lake+/Zen 4+)"
                                              : " (avx512vbmi confirmed)");
+        } else if (!vulnVersion) {
+            reason = "runtime " + version + " is not an affected build";
+        } else if (isArm) {
+            reason = "ARM architecture - the AVX-512 Base64 intrinsic does not exist here";
         } else if (!base64Intrinsics) {
-            verdict = "VULNERABLE_VERSION";
-            reason = "vulnerable runtime but UseBASE64Intrinsics is disabled (workaround in effect)";
-        } else {
-            verdict = "VULNERABLE_VERSION";
-            reason = "vulnerable runtime but CPU did not negotiate AVX-512 (UseAVX=" + useAvx
-                    + ") - not reachable on this CPU today";
-        }
-
-        // Recommendation rules:
-        //  - UseBASE64Intrinsics == true  : the -XX:-UseBASE64Intrinsics workaround is
-        //    NOT in effect and the vulnerable stub is live -> recommend PATCH regardless
-        //    of the current CPU (workloads migrate to AVX-512 hosts).
-        //  - UseBASE64Intrinsics == false : workaround is active; consult additional CPU
-        //    information as a SECONDARY confirmation of whether the hardware would be
-        //    exposed if the flag were ever re-enabled.
-        boolean suggestPatch = vulnVersion && base64Intrinsics && !isArm;
-        String action;
-        String secondary = "";
-        if (verdict.equals("NOT_AFFECTED")) {
-            action = "NONE";
-        } else if (suggestPatch) {
-            action = "PATCH";                                          // intrinsics on -> patch
-        } else {
-            // UseBASE64Intrinsics == false -> secondary CPU confirmation.
-            boolean hwCapable = avx512 && (vbmiConfirmed == null || vbmiConfirmed.booleanValue());
-            String model = cpuModel();
-            String modelTag = model.isEmpty() ? "" : " [" + model + "]";
-            if (hwCapable) {
-                action = "PATCH (workaround -XX:-UseBASE64Intrinsics is the ONLY safeguard)";
-                secondary = "secondary CPU check: hardware IS AVX-512 capable" + modelTag
-                        + (vbmiConfirmed == null ? " (UseAVX=3; verify VBMI / Ice Lake+/Zen 4+)" : " (avx512vbmi confirmed)")
-                        + " - exposed if intrinsics are re-enabled";
-            } else {
-                action = "PATCH_WHEN_ABLE";
-                secondary = "secondary CPU check: hardware is NOT AVX-512 VBMI capable (UseAVX=" + useAvx + ")"
-                        + modelTag + " - not reachable even if intrinsics are re-enabled";
-            }
+            reason = "affected build, but UseBASE64Intrinsics is disabled - the vulnerable path cannot execute"
+                    + (cpuAvx512 ? "" : " (this CPU also has no AVX-512, UseAVX=" + useAvx + ")" + modelTag);
+        } else { // intrinsics enabled but the CPU has no AVX-512
+            reason = "affected build with intrinsics enabled, but this CPU has no AVX-512 (UseAVX=" + useAvx
+                    + ")" + modelTag + " - the vulnerable path is not used";
         }
 
         if (!quiet) {
-            System.out.println("Java4Shell dynamic probe (" + CVE + ")");
+            System.out.println("Java4Shell dynamic probe (" + CVE + ")  [point-in-time check]");
             System.out.println("  runtime            : " + runtime + "  [" + vendor + "]");
-            System.out.println("  os.arch            : " + arch);
-            System.out.println("  vulnerable version : " + vulnVersion);
+            System.out.println("  os.arch            : " + arch + (model.isEmpty() ? "" : "   " + model));
+            System.out.println("  affected build     : " + vulnVersion + "   (version is in the vulnerable range)");
+            System.out.println("  UseBASE64Intrinsics: " + base64Intrinsics
+                    + "   (vulnerable intrinsic " + (base64Intrinsics ? "ENABLED" : "disabled") + ")");
             System.out.println("  UseAVX             : " + (useAvx < 0 ? "unknown" : String.valueOf(useAvx))
-                    + (avx512 ? "  (AVX-512 active)" : "  (no AVX-512)"));
-            System.out.println("  UseBASE64Intrinsics: " + base64Intrinsics);
+                    + (cpuAvx512 ? "  (AVX-512 active)" : "  (no AVX-512)"));
             System.out.println("  avx512vbmi (Linux) : " + (vbmiConfirmed == null ? "not determinable here" : vbmiConfirmed));
             System.out.println("  intrinsic exercised: " + exercised + "  (last decoded length=" + sink + ")");
+            System.out.println("  VULNERABLE NOW     : " + vulnerableNow);
             System.out.println("  reason             : " + reason);
-            System.out.println("  recommended action : " + action);
-            if (!secondary.isEmpty())
-                System.out.println("  " + secondary);
         }
 
         // The authoritative, machine-readable result line.
-        System.out.println("JAVA4SHELL_RESULT: " + verdict + " | action=" + action
-                + " | version=" + version + " | useAVX=" + useAvx
-                + " | base64Intrinsics=" + base64Intrinsics
-                + (secondary.isEmpty() ? "" : " | " + secondary)
+        System.out.println("JAVA4SHELL_RESULT: " + verdict + " | vulnerableNow=" + vulnerableNow
+                + " | version=" + version + " | affectedBuild=" + vulnVersion
+                + " | useAVX=" + useAvx + " | base64Intrinsics=" + base64Intrinsics
                 + " | reason=" + reason);
 
-        System.exit("EXPLOITABLE".equals(verdict) ? 2 : ("VULNERABLE_VERSION".equals(verdict) ? 1 : 0));
+        System.exit(vulnerableNow ? 2 : 0);
     }
 
     /** Force C2 to compile and run the vectorized Base64 decode intrinsic. */
@@ -299,11 +272,15 @@ public final class Base64IntrinsicTest {
         System.out.println("Base64IntrinsicTest - dynamic probe for " + CVE + " (Java4Shell)");
         System.out.println();
         System.out.println("Run this class/JAR UNDER the JVM you want to test. It inspects that JVM's");
-        System.out.println("negotiated VM options and version in-process and prints a single result line:");
+        System.out.println("negotiated VM options and version in-process and answers a POINT-IN-TIME");
+        System.out.println("question: is the vulnerable Base64 path reachable on this JVM, on this");
+        System.out.println("hardware, as configured, right now? It prints a single result line:");
         System.out.println();
-        System.out.println("  JAVA4SHELL_RESULT: <EXPLOITABLE|VULNERABLE_VERSION|NOT_AFFECTED> | ...");
+        System.out.println("  JAVA4SHELL_RESULT: <VULNERABLE|NOT_VULNERABLE> | vulnerableNow=... | ...");
         System.out.println();
-        System.out.println("Exit codes: 2=exploitable, 1=vulnerable version, 0=not affected.");
+        System.out.println("VULNERABLE requires ALL of: affected build AND UseBASE64Intrinsics=true AND");
+        System.out.println("AVX-512 active (UseAVX>=3). If any is false the bug cannot execute here.");
+        System.out.println("Exit codes: 2=vulnerable now, 0=not vulnerable now.");
         System.out.println("Options: --quiet (only the result line), --help.");
     }
 

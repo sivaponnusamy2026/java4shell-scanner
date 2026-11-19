@@ -4,11 +4,18 @@ A **dynamic** detector for **CVE-2026-114938 ("Java4Shell")** — the heap buffe
 overflow in OpenJDK's AVX-512 `java.util.Base64` decoder.
 
 Unlike a static version/CPU scanner, this build decides the result **empirically,
-from inside the JVM under test**. You run `Base64IntrinsicTest` *with* a given
-runtime; it inspects that runtime in-process and prints one authoritative line:
+from inside the JVM under test**, and answers one **point-in-time** question:
+
+> Is the vulnerable Base64 path reachable on **this JVM, on this hardware, as
+> configured, right now?**
+
+The JVM stays on the hardware it was measured on, so a "what if it were moved to an
+AVX-512 host" scenario is deliberately **out of scope**. You run
+`Base64IntrinsicTest` *with* a given runtime; it inspects that runtime in-process
+and prints one authoritative line:
 
 ```
-JAVA4SHELL_RESULT: <EXPLOITABLE|VULNERABLE_VERSION|NOT_AFFECTED> | action=... | ...
+JAVA4SHELL_RESULT: <VULNERABLE|NOT_VULNERABLE> | vulnerableNow=... | ...
 ```
 
 Everything a caller needs is derived from that line (and the exit code). Run the
@@ -16,40 +23,43 @@ file; read its output; that is the result.
 
 ## How the verdict is formed (inside the probe)
 
-1. **Version** — reads its own `java.version` and decides whether the build is in
-   the affected range (17.0.6+, and all of 21/25/27 below the fix; Oracle 8 EPP
-   `-perf`). Java 8/11 and patched builds are not affected.
-2. **VM options, read in-process** via `HotSpotDiagnosticMXBean` — no external
-   tool, no parsing of `java -version`:
-   - **`UseBASE64Intrinsics == true`** → the `-XX:-UseBASE64Intrinsics` workaround
-     is **not** in effect and the vulnerable stub is live → **recommend PATCH**,
-     regardless of the current CPU (workloads migrate to AVX-512 hosts).
-   - **`UseBASE64Intrinsics == false`** → the workaround is active, so the probe
-     consults **additional CPU information as a secondary confirmation**
-     (negotiated `UseAVX`, Linux `avx512vbmi` flag, CPU model) of whether the
-     hardware would be exposed if the flag were ever re-enabled.
-   - **`UseAVX`** — `>= 3` means the JVM negotiated AVX-512 for this CPU (the
-     condition under which the vulnerable intrinsic is compiled and used).
-3. **Exercise** — drives `Base64` decoding in a warm-up loop so C2 actually
-   compiles the vectorized intrinsic. A clean completion still prints a verdict; a
-   hard JVM crash prints none — which the launcher treats as a strong affected
-   signal.
+The result is **`VULNERABLE`** only when **all three** hold at the moment of the
+check; if any is false, the bug cannot execute on this host as it stands, so the
+result is **`NOT_VULNERABLE`**:
+
+1. **Affected build** — reads its own `java.version`; the build must be in the
+   affected range (17.0.6+, and all of 21/25/27 below the fix; Oracle 8 EPP
+   `-perf`). Java 8/11 and patched builds are not affected. *(Reported separately
+   as `affectedBuild=` so you still see the on-disk version status.)*
+2. **`UseBASE64Intrinsics == true`** — read in-process via `HotSpotDiagnosticMXBean`
+   (no external tool). If it is `false` — whether set by `-XX:-UseBASE64Intrinsics`
+   or auto-disabled by HotSpot on a non-AVX-512 CPU — the vulnerable stub cannot
+   run, so the host is **not vulnerable now**.
+3. **AVX-512 active (`UseAVX >= 3`)** — also read in-process; on Linux the
+   `avx512vbmi` CPU flag is additionally confirmed. Without it the vectorized
+   vulnerable path is never used.
+
+It also exercises `Base64` decoding in a warm-up loop so C2 compiles the intrinsic;
+a clean run still prints a verdict, while a hard JVM crash prints none — which the
+launcher can treat as a strong signal.
 
 > The probe trusts the JVM's **negotiated `UseAVX`** over the CPU model string.
 > In a VM/container where AVX-512 is masked, a Skylake/Cascade-class model name
-> may appear while `UseAVX=2` — the probe correctly reports the CPU as not
-> reachable, because what the JVM negotiated is what an attacker actually hits.
+> may appear while `UseAVX=2` — the probe correctly reports the path as not used,
+> because what the JVM negotiated is what an attacker actually hits.
 
-### Verdicts and actions
-| Result | Meaning | `action` |
-|---|---|---|
-| `EXPLOITABLE` | vulnerable runtime **and** AVX-512 Base64 intrinsic active | `PATCH` |
-| `VULNERABLE_VERSION` | vulnerable runtime, intrinsics on but CPU didn't negotiate AVX-512 | `PATCH` |
-| `VULNERABLE_VERSION` | vulnerable runtime, workaround on, **hardware IS AVX-512 capable** | `PATCH (workaround is the ONLY safeguard)` |
-| `VULNERABLE_VERSION` | vulnerable runtime, workaround on, hardware not capable | `PATCH_WHEN_ABLE` |
-| `NOT_AFFECTED` | patched/old runtime, or ARM | `NONE` |
+### Verdicts
+| Result | Meaning |
+|---|---|
+| `VULNERABLE` | affected build **AND** `UseBASE64Intrinsics=true` **AND** AVX-512 active — the vulnerable path can execute now |
+| `NOT_VULNERABLE` | any one of those is false (patched/old build, intrinsics disabled, no AVX-512, or ARM) |
 
-Exit codes: **2** = exploitable, **1** = vulnerable version, **0** = not affected.
+Exit codes: **2** = vulnerable now, **0** = not vulnerable now.
+
+> **Note on patching.** This is a *current-state* check, not patch advice. A JVM
+> reported `NOT_VULNERABLE` only because `UseBASE64Intrinsics=false` or the CPU
+> lacks AVX-512 is still running an `affectedBuild=true` binary; the `affectedBuild`
+> field preserves that fact if you later want to drive patching separately.
 
 ## Run it
 
