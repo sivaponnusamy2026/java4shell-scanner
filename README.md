@@ -3,6 +3,55 @@
 A **dynamic** detector for **CVE-2026-114938 ("Java4Shell")** — the heap buffer
 overflow in the JDK's AVX-512 `java.util.Base64` decoder.
 
+This tool answers **two practical questions about the JVM you actually have installed:**
+
+1. **Is my JVM vulnerable to CVE-2026-114938 right now?**
+2. **Does turning off the JVM property `UseBASE64Intrinsics` actually fix it?** — and it
+   lets you *prove* the fix on your own machine, not just take it on faith.
+
+> [!IMPORTANT]
+> ### TL;DR — what you get
+>
+> **① Does the CVE exist in *your* installed JVM?**
+> Point the probe at any `java` and it prints one verdict — `VULNERABLE` or
+> `NOT_VULNERABLE` — for **that exact runtime, on your exact hardware, as configured,
+> right now.** No guessing from version numbers alone.
+>
+> **② Does the `UseBASE64Intrinsics` workaround really fix it?** ✅ **Yes.**
+> The vulnerable code is HotSpot's hand-written AVX-512 Base64 decode stub. That stub
+> is **only installed when the JVM flag `UseBASE64Intrinsics` is `true`.** Set it to
+> `false` (`-XX:-UseBASE64Intrinsics`) and the vulnerable path **no longer exists in the
+> running JVM** — so the bug cannot be triggered, with no code change and no restart of
+> anything but the JVM itself.
+>
+> This probe lets you **see that happen on your own box:** run it once as-is, then
+> re-run with `--intrinsics off`, and watch the verdict flip
+> `VULNERABLE` → `NOT_VULNERABLE`.
+
+> [!TIP]
+> ### Prove the fix in 30 seconds
+>
+> On a JVM that is vulnerable as it stands (affected build **+** AVX-512 active):
+>
+> ```sh
+> # 1) Test your JVM exactly as it runs today
+> ./probe.sh
+> #    -> JAVA4SHELL_RESULT: VULNERABLE | vulnerableNow=true | base64Intrinsics=true | ...
+>
+> # 2) Re-test with the workaround applied
+> ./probe.sh --intrinsics off          # adds -XX:-UseBASE64Intrinsics
+> #    -> JAVA4SHELL_RESULT: NOT_VULNERABLE | vulnerableNow=false | base64Intrinsics=false | ...
+> ```
+>
+> The only thing that changed is the flag — and the verdict changed with it. That is the
+> workaround working, demonstrated on the machine you care about. To make it permanent,
+> add `-XX:-UseBASE64Intrinsics` to that JVM's startup options (or upgrade to a patched
+> build — see [Fix](#scope--limits)).
+>
+> *(If your machine is already `NOT_VULNERABLE` as-is — e.g. no AVX-512, or a patched
+> build — there is nothing to flip; the `affectedBuild=` field still tells you whether
+> the binary itself is in the vulnerable range.)*
+
 Works across **all JDK distributions** — Oracle JDK, OpenJDK, and OpenJDK-derived
 builds (Eclipse Temurin, Amazon Corretto, Azul Zulu, Microsoft, BellSoft Liberica,
 Red Hat, SapMachine, …). It reads the runtime's own version and negotiated VM
