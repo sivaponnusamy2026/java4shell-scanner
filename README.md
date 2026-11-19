@@ -136,3 +136,14 @@ thresholds live in `isVulnerableVersion(...)`.
 *Fix: upgrade to a patched build (17.0.21.1 / 21.0.13.1 / 25.0.5.1 / 27.0.1.1).
 Workaround: `-XX:-UseBASE64Intrinsics` (or `-XX:UseAVX=2`). Reflects advisories as
 of 2026-11-18.*
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+The software is provided **"AS IS", without warranty of any kind**. This is a
+vulnerability probe that exercises a real code path on the JVM it runs against,
+which may crash an affected runtime; you are responsible for ensuring you are
+authorized to scan the target and for running it only where a JVM crash is
+acceptable. You use it entirely **at your own risk**. See the [LICENSE](LICENSE)
+file for the full warranty disclaimer and risk-assumption terms.
