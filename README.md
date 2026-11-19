@@ -84,10 +84,30 @@ probe.cmd --java "C:\jdk\bin\java.exe"
 probe.cmd --dir "C:\Program Files\Java"
 ```
 
-To confirm the workaround path on any host:
+### Setting JVM flags for the runtime under test
+
+The launchers place JVM flags **before** `-jar` (where the JVM reads them), so you
+can model a specific configuration — most usefully the Base64 workaround:
+
 ```sh
-java -XX:-UseBASE64Intrinsics -jar dist/java4shell-probe.jar
+./probe.sh --intrinsics off          # adds -XX:-UseBASE64Intrinsics (workaround on)
+./probe.sh --intrinsics on           # adds -XX:+UseBASE64Intrinsics
+./probe.sh --jvm-arg -XX:UseAVX=2    # any flag, repeatable
+./probe.sh --jvm-arg -Dfoo=bar --jvm-arg -Xmx64m
+./probe.sh -XX:-UseBASE64Intrinsics  # bare -X.../-D... flags are auto-routed to the JVM
 ```
+```bat
+probe.cmd --intrinsics off
+probe.cmd --jvm-arg -XX:UseAVX=2
+```
+Flags apply to **every** runtime tested, including each one under `--dir`. Running
+the probe directly works too: `java <flags> -jar dist/java4shell-probe.jar`.
+
+> These override what the JVM would negotiate on its own, letting you check
+> "would this JVM be vulnerable **if** the intrinsic were (re-)enabled?" — e.g.
+> `--intrinsics on` flips `base64Intrinsics=true` even where HotSpot auto-disabled
+> it. The verdict still requires AVX-512 to be actually active, so on a non-AVX-512
+> CPU it stays `NOT_VULNERABLE`.
 
 ## Build from source
 ```sh

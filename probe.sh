@@ -7,10 +7,17 @@
 # a chosen java and relays what the probe prints.
 #
 # Usage:
-#   ./probe.sh                       # test the default `java` (PATH / JAVA_HOME)
-#   ./probe.sh --java /path/to/java  # test one specific runtime
-#   ./probe.sh --dir /opt/jvms       # run the probe under EVERY JVM found under DIR
-#   ./probe.sh --quiet               # pass-through to the probe (result line only)
+#   ./probe.sh                              # test the default `java` (PATH / JAVA_HOME)
+#   ./probe.sh --java /path/to/java         # test one specific runtime
+#   ./probe.sh --dir /opt/jvms              # run the probe under EVERY JVM found under DIR
+#   ./probe.sh --quiet                      # pass-through to the probe (result line only)
+#
+# Set JVM flags for the runtime under test (placed BEFORE -jar):
+#   ./probe.sh --intrinsics off             # add -XX:-UseBASE64Intrinsics
+#   ./probe.sh --intrinsics on              # add -XX:+UseBASE64Intrinsics
+#   ./probe.sh --jvm-arg -XX:UseAVX=2       # add any JVM flag (repeatable)
+#   ./probe.sh --jvm-arg -Dfoo=bar --jvm-arg -Xmx64m
+# These apply to every runtime tested (including each one under --dir).
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 JAR="$SCRIPT_DIR/dist/java4shell-probe.jar"
@@ -19,10 +26,22 @@ JAR="$SCRIPT_DIR/dist/java4shell-probe.jar"
 JAVA_OVERRIDE=""
 DIR=""
 PASS=""
+JVMOPTS=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --java) JAVA_OVERRIDE="$2"; shift 2 ;;
-        --dir)  DIR="$2"; shift 2 ;;
+        --java)       JAVA_OVERRIDE="$2"; shift 2 ;;
+        --dir)        DIR="$2"; shift 2 ;;
+        --jvm-arg)    JVMOPTS="$JVMOPTS $2"; shift 2 ;;
+        --intrinsics)
+            case "$2" in
+                on|On|ON|true|+)   JVMOPTS="$JVMOPTS -XX:+UseBASE64Intrinsics" ;;
+                off|Off|OFF|false|-) JVMOPTS="$JVMOPTS -XX:-UseBASE64Intrinsics" ;;
+                *) echo "error: --intrinsics expects on|off (got '$2')" >&2; exit 64 ;;
+            esac
+            shift 2 ;;
+        --) shift; while [ $# -gt 0 ]; do PASS="$PASS $1"; shift; done ;;
+        -X*|-D*|-agentlib*|-javaagent*|-ea|-da)  # bare JVM flag -> treat as JVM opt
+            JVMOPTS="$JVMOPTS $1"; shift ;;
         *)      PASS="$PASS $1"; shift ;;
     esac
 done
@@ -35,9 +54,9 @@ find_java() {   # resolve a usable java launcher into $REPLY-ish via echo
 
 run_one() {     # $1 = java binary
     j="$1"
-    echo "=== runtime under test: $j ==="
+    echo "=== runtime under test: $j ${JVMOPTS:+(jvm:$JVMOPTS )}==="
     # shellcheck disable=SC2086
-    "$j" -jar "$JAR" $PASS
+    "$j" $JVMOPTS -jar "$JAR" $PASS
 }
 
 worst=0
